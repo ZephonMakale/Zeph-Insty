@@ -1,218 +1,202 @@
 from django.shortcuts import render, redirect, get_object_or_404
-from .models import Profile, Image, Comment, Follow
-from django.contrib import messages
+from django.http import HttpResponseRedirect, JsonResponse
 from django.contrib.auth.decorators import login_required
-from .forms import UserSignupForm, ProfileForm, ProfileUpdateForm, UserUpdateForm, ImageUploadForm, CommentForm
-from django.http import HttpRequest, HttpResponseRedirect
+from .forms import SignUpForm, UpdateUserForm, UpdateUserProfileForm, PostForm, CommentForm
+from django.contrib.auth import login, authenticate
+from .models import Post, Comment, Profile, Follow
 from django.contrib.auth.models import User
-from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from itertools import chain
-from django.urls import reverse
-from django.views.generic import (
-    ListView,
-    DetailView,
-    CreateView,
-    UpdateView,
-    DeleteView
-)
-
+from django.template.loader import render_to_string
+from django.views.generic import RedirectView
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import authentication, permissions
 
 def signup(request):
     if request.method == 'POST':
-        form = UserSignupForm(request.POST)
+        form = SignUpForm(request.POST)
         if form.is_valid():
             form.save()
             username = form.cleaned_data.get('username')
-            user=form.save()
-            profile= profForm.save(commit=False)
-            profile.user=user
-            profile.save()
-            messages.success(request, f'Your account has been created! You are now able to log in')
-            return redirect('login')
+            raw_password = form.cleaned_data.get('password1')
+            user = authenticate(username=username, password=raw_password)
+            login(request, user)
+            return redirect('index')
     else:
-        form = UserSignupForm()
-        profForm=ProfileForm()
-        context={
-        'form':form,
-        'profForm': profForm
-    }
-    return render(request, 'registration/signup.html', context)
+        form = SignUpForm()
+    return render(request, 'registration/signup.html', {'form': form})
 
-@login_required(login_url='/accounts/login/')
-def profile(request):
+@login_required(login_url='login')
+def index(request):
+    images = Post.objects.all()
+    users = User.objects.exclude(id=request.user.id)
     if request.method == 'POST':
-        useForm=UserUpdateForm(request.POST, instance=request.user)
-        profForm=ProfileUpdateForm(request.POST, request.FILES, instance=request.user.profile)
-        if useForm.is_valid() and profForm.is_valid():
-            useForm.save()
-            profForm.save()
-            messages.success(request, f'Your account has been updated successfully!')
-        return redirect('profile')
-    
+        form = PostForm(request.POST, request.FILES)
+        if form.is_valid():
+            post = form.save(commit=False)
+            post.user = request.user.profile
+            post.save()
+            return HttpResponseRedirect(request.path_info)
     else:
-        useForm=UserUpdateForm(instance=request.user.profile)
-        profForm=ProfileUpdateForm(instance=request.user.profile)
+        form = PostForm()
+    params = {
+        'images': images,
+        'form': form,
+        'users': users,
 
-    context={
-        'useForm':useForm,
-        'profForm':profForm
     }
+    return render(request, 'instagram/index.html', params)
 
-    return render(request, 'profile.html', context)
+@login_required(login_url='login')
+def profile(request, username):
+    images = request.user.profile.posts.all()
+    if request.method == 'POST':
+        user_form = UpdateUserForm(request.POST, instance=request.user)
+        prof_form = UpdateUserProfileForm(request.POST, request.FILES, instance=request.user.profile)
+        if user_form.is_valid() and prof_form.is_valid():
+            user_form.save()
+            prof_form.save()
+            return HttpResponseRedirect(request.path_info)
+    else:
+        user_form = UpdateUserForm(instance=request.user)
+        prof_form = UpdateUserProfileForm(instance=request.user.profile)
+    params = {
+        'user_form': user_form,
+        'prof_form': prof_form,
+        'images': images,
 
-@login_required(login_url='/accounts/login/')
-def home(request):
-    context={
-        'posts': Image.objects.all(),
-        'comments': Comment.objects.all()
     }
+    return render(request, 'instagram/profile.html', params)
 
-    return render(request, 'home.html', context)
-class PostListView(ListView):
-    model = Image
-    template_name = 'home.html'
-    context_object_name = 'posts'
-    ordering = ['-pub_date']
-
-class UserListView(ListView):
-    model=Profile
-    template_name='posts/view.html'
-    context_object_name='posts'
-
-    def get_queryset(self):
-        return Profile.objects.all().exclude(user=self.request.user)
-
-class ProfileDetailView(DeleteView):
-    model=Profile
-    template_name='main/profile.html'
-    context_object_name='posts'
-
-    def get_object(self, **kwargs):
-        pk=self.kwargs.get('pk')
-        avi= Profile.objects.get(pk=pk)
-        return avi
-    def get_context_data(self, **kwargs):
-        context=super().get_context_data(**kwargs)
-        avi=self.get_object()
-        myProf= Profile.objects.get(user=self.request.user)
-        if avi.user in myProf.following.all():
-            follow=True
+@login_required(login_url='login')
+def user_profile(request, username):
+    user_prof = get_object_or_404(User, username=username)
+    if request.user == user_prof:
+        return redirect('profile', username=request.user.username)
+    user_posts = user_prof.profile.posts.all()
+    
+    followers = Follow.objects.filter(followed=user_prof.profile)
+    follow_status = None
+    for follower in followers:
+        if request.user.profile == follower.follower:
+            follow_status = True
         else:
-            follow=False
-        context["follow"]=follow
-        return context
+            follow_status = False
+    params = {
+        'user_prof': user_prof,
+        'user_posts': user_posts,
+        'followers': followers,
+        'follow_status': follow_status
+    }
+    print(followers)
+    return render(request, 'instagram/user_profile.html', params)
 
-class PostDetailView(DetailView):
-    model = Image
-    template_name= 'posts/image_detail.html'
-
-    def get_context_data(self, *args, **kwargs):
-        context=super(PostDetailView, self).get_context_data(*args, **kwargs)
-        stuff=get_object_or_404(Image, id=self.kwargs['pk'])
-        total_likes=stuff.total_likes()
-        context["total_likes"]=total_likes
-        return context
-
-class PostCreateView(LoginRequiredMixin, CreateView):
-    model = Image
-    fields = ['profileimage', 'image_caption', 'profile_name']
-    template_name='posts/postForm.html'
-    def form_valid(self, form):
-        form.instance.author = self.request.user.profile
-        return super().form_valid(form)
-
-class PostUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
-    model = Image
-    fields = ['profileimage', 'image_caption', 'profile_name']
-    template_name='posts/postForm.html'
-
-    def form_valid(self, form):
-        form.instance.author = self.request.user.profile
-        return super().form_valid(form)
-
-    def test_func(self):
-        post = self.get_object()
-        if self.request.user.profile == post.author:
-            return True
-        return False
-
-class PostDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
-    model = Image
-    success_url = '/'
-    template_name= 'posts/delete.html'
-
-    def test_func(self):
-        post = self.get_object()
-        if self.request.user.profile == post.author:
-            return True
-        return False
-
-@login_required(login_url='/accounts/login/')
-def comment(request,id):
-    comments= Comment.objects.filter(profileimage_id=id).all()
-    images= Image.objects.filter(id=id)
-    current_user = request.user
-    user_profile = Profile.objects.get(user = current_user)
-    profileimage = get_object_or_404(Image, id=id)
+@login_required(login_url='login')
+def post_comment(request, id):
+    image = get_object_or_404(Post, pk=id)
+    is_liked = False
+    if image.likes.filter(id=request.user.id).exists():
+        is_liked = True
     if request.method == 'POST':
         form = CommentForm(request.POST)
         if form.is_valid():
-            comment = form.save(commit = False)
-            comment.profileimage_id = profileimage
-            comment.user_id = user_profile
-            comment.save()
-            return redirect('gram-landing')
+            savecomment = form.save(commit=False)
+            savecomment.post = image
+            savecomment.user = request.user.profile
+            savecomment.save()
+            return HttpResponseRedirect(request.path_info)
     else:
         form = CommentForm()
-    return render(request,'posts/comment.html',{"form":form, "images":images, "comments":comments})
+    params = {
+        'image': image,
+        'form': form,
+        'is_liked': is_liked,
+        'total_likes': image.total_likes()
+    }
+    return render(request, 'instagram/single_post.html', params)
+class PostLikeToggle(RedirectView):
+    def get_redirect_url(self, *args, **kwargs):
+        id = self.kwargs.get('id')
+        print(id)
+        obj = get_object_or_404(Post, pk=id)
+        url_ = obj.get_absolute_url()
+        user = self.request.user
+        if user in obj.likes.all():
+            obj.likes.remove(user)
+        else:
+            obj.likes.add(user)
+        return url_
 
-@login_required(login_url='/accounts/login/')
-def searchprofile(request): 
-    if 'searchUser' in request.GET and request.GET['searchUser']:
-        profile_name = request.GET.get("searchUser")
-        searchResults = Profile.search_profile(profile_name)
-        message = f'profile_name'
+class PostLikeAPIToggle(APIView):
+    authentication_classes = [authentication.SessionAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, id=None, format=None):
+        obj = get_object_or_404(Post, pk=id)
+        url_ = obj.get_absolute_url()
+        user = self.request.user
+        updated = False
+        liked = False
+        if user in obj.likes.all():
+            liked = False
+            obj.likes.remove(user)
+        else:
+            liked = True
+            obj.likes.add(user)
+        updated = True
+        data = {
+
+            'updated': updated,
+            'liked': liked,
+        }
+        print(data)
+        return Response(data)
+
+
+def like_post(request):
+    image = get_object_or_404(Post, id=request.POST.get('id'))
+    is_liked = False
+    if image.likes.filter(id=request.user.id).exists():
+        image.likes.remove(request.user)
+        is_liked = False
+    else:
+        image.likes.add(request.user)
+        is_liked = False
+
+    params = {
+        'image': image,
+        'is_liked': is_liked,
+        'total_likes': image.total_likes()
+    }
+    if request.is_ajax():
+        html = render_to_string('instagram/like_section.html', params, request=request)
+        return JsonResponse({'form': html})
+
+@login_required(login_url='login')
+def search_profile(request):
+    if 'search_user' in request.GET and request.GET['search_user']:
+        name = request.GET.get("search_user")
+        results = Profile.search_profile(name)
+        print(results)
+        message = f'name'
         params = {
-            'results': searchResults,
+            'results': results,
             'message': message
         }
-        return render(request, 'main/search.html', params)
+        return render(request, 'instagram/results.html', params)
     else:
-        message = "You haven't searched"
-    return render(request, 'main/search.html', {'message': message})
+        message = "You haven't searched for any image category"
+    return render(request, 'instagram/results.html', {'message': message})
 
-@login_required(login_url='/accounts/login/')
-def follow_unfollow(request, pk):
-    if request.method == 'POST':
-        my_profile = Profile.objects.get(user=request.user)
-        pk= request.POST.get('profile_pk')
-        obj= Profile.objects.get(pk=pk)
+def unfollow(request, to_unfollow):
+    if request.method == 'GET':
+        user_profile2 = Profile.objects.get(pk=to_unfollow)
+        unfollow_d = Follow.objects.filter(follower=request.user.profile, followed=user_profile2)
+        unfollow_d.delete()
+        return redirect('user_profile', user_profile2.user.username)
 
-        if obj.user in my_profile.following.all():
-            my_profile.following.remove(obj.user)
-        else:
-            my_profile.following.add(obj.user)
-        return redirect(request.META.get('HTTP_REFERER'))
-    return redirect('profile-details')
-
-def posts_following(request):
-    profile= Profile.objects.get(user=request.user)
-    users=[user for user in profile.following.all()]
-    posts=[]
-    qs=None
-
-    for u in users:
-        p= Profile.objects.get(user=u)
-        p_posts=p.profiles_posts()
-        posts.append(p_posts)
-    
-    my_posts=profile.profiles_posts()
-    posts.append(my_posts)
-    if len(posts)>0:
-        qs= sorted(chain(*posts), reverse=True, key=lambda obj: obj.pub_date)
-    return render(request, 'main/main.html', {"posts":qs, "profile":profile})
-
-def like_image(request, pk):
-    post= get_object_or_404(Image, id=request.POST.get('post_id'))
-    post.likes.add(request.user)
-    return HttpResponseRedirect(reverse('post-detail', args=[str(pk)]))
+def follow(request, to_follow):
+    if request.method == 'GET':
+        user_profile3 = Profile.objects.get(pk=to_follow)
+        follow_s = Follow(follower=request.user.profile, followed=user_profile3)
+        follow_s.save()
+        return redirect('user_profile', user_profile3.user.username)
