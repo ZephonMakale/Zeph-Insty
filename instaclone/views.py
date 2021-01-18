@@ -184,7 +184,7 @@ def search_profile(request):
         }
         return render(request, 'instagram/results.html', params)
     else:
-        message = "You haven't searched for any image category"
+        message = "You have not yet searched for any image category"
     return render(request, 'instagram/results.html', {'message': message})
 
 def unfollow(request, to_unfollow):
