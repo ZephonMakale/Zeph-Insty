@@ -9,5 +9,16 @@ class Post(models.Model):
     user = models.ForeignKey(User, on_delete = models.CASCADE)
     image_caption = models.CharField(max_length= 100, blank=True)
     timestamp = models.DateTimeField(default= timezone.now)
+
+    def __str__(self):
+        return self.profile_image
+    class Meta:
+        ordering = ['profile_image']
+
+class Profile(models.Model):
+    title = models.CharField(max_length =60)
+    post = models.TextField()
+    editor = models.ForeignKey(Editor)
+
     
     

@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from .forms import UserSignupForm
+from .models import Post
 
 
 def signup(request):
@@ -19,4 +20,10 @@ def signup(request):
 @login_required
 def profile(request):
     return render(request, 'profile.html')
+
+
+def home(request):
+    context = {'posts': Post.objects.all()}
+    
+    return render(request, 'home.html', context)
 
