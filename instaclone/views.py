@@ -10,6 +10,7 @@ from django.views.generic import RedirectView
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import authentication, permissions
+from .email import send_welcome_email
 
 def signup(request):
     if request.method == 'POST':

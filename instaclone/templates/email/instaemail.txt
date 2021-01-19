@@ -1,0 +1,3 @@
+Hello {{name}}
+
+Welcome to the Instaclub-Ig app clone, You will find the most exciting posts from people all over the world.
