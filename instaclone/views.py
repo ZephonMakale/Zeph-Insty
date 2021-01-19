@@ -10,7 +10,6 @@ from django.views.generic import RedirectView
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import authentication, permissions
-from .email import send_welcome_email
 
 def signup(request):
     if request.method == 'POST':
@@ -185,7 +184,7 @@ def search_profile(request):
         }
         return render(request, 'instagram/results.html', params)
     else:
-        message = "You have not yet searched for any image category"
+        message = "You haven't searched for any image category"
     return render(request, 'instagram/results.html', {'message': message})
 
 def unfollow(request, to_unfollow):
